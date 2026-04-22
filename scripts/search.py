@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-Google PSE (Programmable Search Engine) search script.
+Google PSE (Programmable Search Engine) search script with optional Tavily provider.
 
 Usage:
   python search.py "query"
@@ -12,10 +12,15 @@ Usage:
   python search.py "query" --site example.com
   python search.py "query" --start 11
   python search.py "query" --raw
+  python search.py "query" --provider tavily
+  python search.py "query" --provider auto
 
 Environment variables required:
-  GOOGLE_PSE_KEY   API key
-  GOOGLE_CX_ID     Programmable Search Engine ID
+  GOOGLE_PSE_KEY   API key (for google provider)
+  GOOGLE_CX_ID     Programmable Search Engine ID (for google provider)
+
+Optional environment variables:
+  TAVILY_API_KEY   Tavily API key (enables tavily/auto provider)
 """
 
 import argparse
@@ -31,6 +36,82 @@ except ImportError:
     sys.exit(1)
 
 API_URL = "https://customsearch.googleapis.com/customsearch/v1"
+
+
+def get_tavily_client():
+    """Return a TavilyClient if tavily-python is installed and TAVILY_API_KEY is set."""
+    api_key = os.environ.get("TAVILY_API_KEY")
+    if not api_key:
+        return None
+    try:
+        from tavily import TavilyClient
+        return TavilyClient(api_key=api_key)
+    except ImportError:
+        return None
+
+
+def tavily_search(args):
+    """Perform a search using the Tavily API and print results in the same format."""
+    client = get_tavily_client()
+    if client is None:
+        print("Error: Tavily is not available.")
+        print("  Ensure TAVILY_API_KEY is set and tavily-python is installed:")
+        print("  pip install tavily-python")
+        sys.exit(1)
+
+    kwargs = {
+        "query": args.query,
+        "max_results": min(max(1, args.num), 10),
+        "search_depth": "advanced",
+    }
+
+    if args.site:
+        kwargs["include_domains"] = [args.site]
+
+    try:
+        response = client.search(**kwargs)
+    except Exception as e:
+        print(f"Error: Tavily search failed: {e}")
+        sys.exit(1)
+
+    if args.raw:
+        print(json.dumps(response, ensure_ascii=False, indent=2))
+        return
+
+    print(format_tavily_results(response, args))
+
+
+def format_tavily_results(data, args):
+    """Format Tavily results into the same Markdown format as Google PSE."""
+    results = data.get("results", [])
+
+    lang_code = args.lang.lower()
+    gl = args.gl if args.gl else LANG_MAP.get(lang_code, ("", lang_code))[1]
+
+    conditions = [f"lang:{lang_code}", f"region:{gl}", "provider:tavily"]
+    if args.site:
+        conditions.append(f"site:{args.site}")
+
+    lines = []
+    lines.append(f'## Search Results: "{args.query}" ({len(results)} results)')
+    lines.append(f'> Filters: {" · ".join(conditions)}')
+    lines.append("")
+
+    if not results:
+        lines.append("No results found. Try adjusting your query or removing filters.")
+        return "\n".join(lines)
+
+    for i, item in enumerate(results, 1):
+        title = item.get("title", "(no title)")
+        url = item.get("url", "")
+        snippet = item.get("content", "").replace("\n", " ").strip()
+        lines.append(f"### {i}. [{title}]({url})")
+        if snippet:
+            lines.append(snippet)
+        lines.append("")
+
+    return "\n".join(lines)
+
 
 LANG_MAP = {
     "ko": ("lang_ko", "kr"),
@@ -131,6 +212,18 @@ def format_results(data, args):
 
 
 def search(args):
+    provider = getattr(args, "provider", "google")
+
+    if provider == "tavily":
+        tavily_search(args)
+        return
+
+    if provider == "auto" and not os.environ.get("GOOGLE_PSE_KEY"):
+        # No Google credentials; try Tavily directly
+        if get_tavily_client() is not None:
+            tavily_search(args)
+            return
+
     api_key, cx_id = get_env()
     params = build_params(args, api_key, cx_id)
 
@@ -143,6 +236,15 @@ def search(args):
         print("Error: Network connection failed")
         sys.exit(1)
 
+    # On quota/rate-limit errors, fall back to Tavily when provider=auto
+    if resp.status_code in (403, 429) and provider == "auto":
+        client = get_tavily_client()
+        if client is not None:
+            print(f"# Google PSE returned {resp.status_code}, falling back to Tavily...\n",
+                  file=sys.stderr)
+            tavily_search(args)
+            return
+
     if resp.status_code == 400:
         err = resp.json().get("error", {}).get("message", "")
         print(f"Error: Bad request (400): {err}")
@@ -150,13 +252,13 @@ def search(args):
     elif resp.status_code == 403:
         err = resp.json().get("error", {}).get("message", "")
         if "quota" in err.lower() or "limit" in err.lower():
-            print("Error: Daily quota exceeded (100 requests/day). Use duckduckgo-search as fallback.")
+            print("Error: Daily quota exceeded (100 requests/day). Use --provider tavily or --provider auto as fallback.")
         else:
             print(f"Error: Access denied (403). Check your API key or CX ID.")
             print(f"  Details: {err}")
         sys.exit(1)
     elif resp.status_code == 429:
-        print("Error: Rate limit exceeded (429). Use duckduckgo-search as fallback.")
+        print("Error: Rate limit exceeded (429). Use --provider tavily or --provider auto as fallback.")
         sys.exit(1)
     elif not resp.ok:
         print(f"Error: API error ({resp.status_code}): {resp.text[:200]}")
@@ -185,6 +287,12 @@ def main():
     parser.add_argument("--site", default="", help="Restrict search to a specific site")
     parser.add_argument("--start", type=int, default=1, help="Start index for pagination (default: 1)")
     parser.add_argument("--raw", action="store_true", help="Print raw JSON response (debug)")
+    parser.add_argument(
+        "--provider",
+        choices=["google", "tavily", "auto"],
+        default="google",
+        help="Search provider: google (default), tavily, or auto (Google with Tavily fallback)",
+    )
 
     args = parser.parse_args()
     search(args)

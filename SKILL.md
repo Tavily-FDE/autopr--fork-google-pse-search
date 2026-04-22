@@ -1,13 +1,15 @@
 ---
 name: google-pse-search
 description: >
-  Web search skill powered by Google PSE (Programmable Search Engine) API.
+  Web search skill powered by Google PSE (Programmable Search Engine) API
+  with optional Tavily search as a parallel/fallback provider.
   Primary search tool for all web queries — Korean and English alike.
   Better search quality than DuckDuckGo, especially for Korean content.
   Triggers: "search for", "find", "look up", news/current events, recent info,
   date-filtered searches, site-specific searches, any general web search request.
   Requires environment variables: GOOGLE_PSE_KEY, GOOGLE_CX_ID.
-  Falls back to duckduckgo-search only on quota exceeded (HTTP 429/403) or API errors.
+  Optional: TAVILY_API_KEY (enables --provider tavily and --provider auto fallback).
+  Falls back to Tavily (if configured) or duckduckgo-search on quota exceeded (HTTP 429/403).
 ---
 
 # Google PSE Search
@@ -16,8 +18,11 @@ description: >
 
 ```
 1st: google-pse-search  ← this skill (default for all web searches)
+     --provider google   (default) uses Google PSE API
+     --provider tavily   uses Tavily API directly
+     --provider auto     uses Google PSE, falls back to Tavily on 403/429
 2nd: web_fetch          ← when URL is known (official docs, specific pages)
-3rd: duckduckgo-search  ← fallback on quota exceeded or API errors only
+3rd: duckduckgo-search  ← fallback when neither Google PSE nor Tavily is available
 ```
 
 ## Basic Usage
@@ -46,6 +51,12 @@ python $SKILL_DIR/scripts/search.py "query" --exact "must include" --exclude "ex
 
 # Pagination (page 2)
 python $SKILL_DIR/scripts/search.py "query" --start 11
+
+# Use Tavily as search provider (requires TAVILY_API_KEY)
+python $SKILL_DIR/scripts/search.py "query" --provider tavily
+
+# Auto mode: Google PSE with Tavily fallback on quota errors
+python $SKILL_DIR/scripts/search.py "query" --provider auto
 ```
 
 ## Options
@@ -61,13 +72,14 @@ python $SKILL_DIR/scripts/search.py "query" --start 11
 | `--site SITE` | — | Restrict to a specific site |
 | `--start N` | 1 | Start index for pagination |
 | `--raw` | — | Print raw JSON (debug) |
+| `--provider` | google | Search provider: `google`, `tavily`, or `auto` |
 
 ## Error Handling
 
 | Error | Cause | Action |
 |-------|-------|--------|
 | Missing env vars | .env not configured | Set GOOGLE_PSE_KEY and GOOGLE_CX_ID |
-| HTTP 403/429 | Quota exceeded | Use duckduckgo-search as fallback |
+| HTTP 403/429 | Quota exceeded | Use `--provider auto` for Tavily fallback, or duckduckgo-search |
 | HTTP 400 | Invalid parameters | Check option values |
 | 0 results | Query or filter issue | Adjust query or remove filters |
 
