@@ -66,7 +66,7 @@ python $SKILL_DIR/scripts/search.py "query" --provider auto
 | `--num N` | 5 | Number of results (1–10) |
 | `--lang LANG` | ko | Language code (ko/en/ja/zh) |
 | `--gl GL` | auto by lang | Region code override |
-| `--date DATE` | — | Date restriction (d7/m1/y1 etc.) |
+| `--date DATE` | — | Date restriction (d7/m1/y1 etc.). Tavily maps d1→day, d7/w1→week, m1→month, y1→year; other values are unsupported. |
 | `--exact PHRASE` | — | Phrase that must appear in results |
 | `--exclude TERM` | — | Term to exclude from results |
 | `--site SITE` | — | Restrict to a specific site |
@@ -82,6 +82,7 @@ python $SKILL_DIR/scripts/search.py "query" --provider auto
 | HTTP 403/429 | Quota exceeded | Use `--provider auto` for Tavily fallback, or duckduckgo-search |
 | HTTP 400 | Invalid parameters | Check option values |
 | 0 results | Query or filter issue | Adjust query or remove filters |
+| Unsupported flag warning | --exact/--exclude/--start used with Tavily | These flags are Google-only; a stderr warning is emitted |
 
 ## API Reference
 

@@ -50,14 +50,44 @@ def get_tavily_client():
         return None
 
 
-def tavily_search(args):
+DATE_TO_TIME_RANGE = {
+    "d1": "day",
+    "d7": "week",
+    "w1": "week",
+    "m1": "month",
+    "y1": "year",
+}
+
+
+def _warn_unsupported_tavily_flags(args):
+    """Emit a stderr warning when Google-only flags are used with Tavily."""
+    unsupported = []
+    if args.date and args.date not in DATE_TO_TIME_RANGE:
+        unsupported.append(f"--date {args.date}")
+    if args.exact:
+        unsupported.append("--exact")
+    if args.exclude:
+        unsupported.append("--exclude")
+    if args.start > 1:
+        unsupported.append("--start")
+    if unsupported:
+        print(
+            f"Warning: {', '.join(unsupported)} not fully supported by Tavily and will be ignored.",
+            file=sys.stderr,
+        )
+
+
+def tavily_search(args, client=None):
     """Perform a search using the Tavily API and print results in the same format."""
-    client = get_tavily_client()
+    if client is None:
+        client = get_tavily_client()
     if client is None:
         print("Error: Tavily is not available.")
         print("  Ensure TAVILY_API_KEY is set and tavily-python is installed:")
         print("  pip install tavily-python")
         sys.exit(1)
+
+    _warn_unsupported_tavily_flags(args)
 
     kwargs = {
         "query": args.query,
@@ -67,6 +97,11 @@ def tavily_search(args):
 
     if args.site:
         kwargs["include_domains"] = [args.site]
+
+    if args.date:
+        time_range = DATE_TO_TIME_RANGE.get(args.date)
+        if time_range:
+            kwargs["time_range"] = time_range
 
     try:
         response = client.search(**kwargs)
@@ -242,7 +277,7 @@ def search(args):
         if client is not None:
             print(f"# Google PSE returned {resp.status_code}, falling back to Tavily...\n",
                   file=sys.stderr)
-            tavily_search(args)
+            tavily_search(args, client=client)
             return
 
     if resp.status_code == 400:

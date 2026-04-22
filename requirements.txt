@@ -1,2 +1,2 @@
-requests
-tavily-python
+requests>=2.28
+tavily-python>=0.5
